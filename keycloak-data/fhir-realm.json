@@ -1,0 +1,52 @@
+{
+  "realm": "fhir",
+  "enabled": true,
+  "clients": [
+    {
+      "clientId": "precise-hbr-app", 
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "fullScopeAllowed": true,
+      "redirectUris": [
+        "http://localhost:8080/callback" 
+      ],
+      "webOrigins": [
+        "*"
+      ],
+      "protocolMappers": [
+        {
+          "name": "force-scope",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "config": {
+            "claim.name": "scope",
+            "claim.value": "openid profile launch patient/Patient.read patient/Observation.read patient/Condition.read fhirUser",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "force-aud",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "precise-hbr-app",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "fhir-admin",
+      "enabled": true,
+      "credentials": [{"type": "password", "value": "fhir-admin"}],
+      "realmRoles": ["offline_access", "uma_authorization", "fhir-user"]
+    }
+  ],
+  "roles": { "realm": [{"name": "fhir-user"}] }
+}
