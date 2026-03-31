@@ -1,173 +1,120 @@
-# We create one volume for each supported FHIR version. These volumes will
-# contain and persist the H2 database file
 volumes:
-  r2-database:
-  r3-database:
   r4-database:
+    name: r4-database
   postgres_data:
+    name: postgres_data
 
 services:
-
-  r2: # ------------------------------------------------------------------------
-    container_name: hapi-r2
-    image: ${R2_IMAGE}
-    environment:
-      - PORT=${R2_PORT}
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-proxy
     ports:
-      - "${R2_PORT}:8080"
+      - "80:80"
     volumes:
-      - "r2-database:/usr/local/tomcat/target/database"
-    command:
-      - /bin/sh
-      - -c
-      - |
-        envsubst < /tmp/hapi.properties.tpl > /config/hapi.properties
-        envsubst < /tmp/server.xml > /usr/local/tomcat/conf/server.xml
-        catalina.sh run
-    deploy:
-      resources:
-        limits:
-          cpus: "${R2_CPU_CORES}"
-          memory: ${R2_MEMORY}
-      replicas: ${R2_ENABLED}
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./www:/usr/share/nginx/html:ro
+    depends_on:
+      keycloak:
+        condition: service_started
+      smart-launcher:
+        condition: service_started
+      oauth2-proxy:
+        condition: service_started
+    networks:
+      - fhir-network
 
-  r3: # ------------------------------------------------------------------------
-    container_name: hapi-r3
-    image: ${R3_IMAGE}
+  keycloak:
+    container_name: keycloak
+    image: quay.io/keycloak/keycloak:22.0.1
+    command: start-dev --import-realm --db=postgres --http-port 8180 --http-enabled=true
+    depends_on:
+      db:
+        condition: service_started
     environment:
-      - PORT=${R3_PORT}
-    ports:
-      - "${R3_PORT}:8080"
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+      - KC_BOOTSTRAP_ADMIN_USERNAME=fhir-admin
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=pa55word
+      - KC_HOSTNAME=${HOST_IP}
+      - KC_HOSTNAME_PORT=80
+      - KC_HOSTNAME_STRICT=false
+      - KC_HOSTNAME_STRICT_HTTPS=false
+      - KC_PROXY_HEADERS=xforwarded
+      - KC_DB=postgres
+      - KC_DB_URL=jdbc:postgresql://db/keycloak
+      - KC_DB_USERNAME=kcuser
+      - KC_DB_PASSWORD=kcpassword
+      - KC_HTTP_RELATIVE_PATH=/
+      - KC_PROXY=edge
     volumes:
-      - "r3-database:/usr/local/tomcat/target/database"
-    command:
-      - /bin/sh
-      - -c
-      - |
-        envsubst < /tmp/hapi.properties.tpl > /config/hapi.properties
-        envsubst < /tmp/server.xml > /usr/local/tomcat/conf/server.xml
-        catalina.sh run
-    deploy:
-      resources:
-        limits:
-          cpus: "${R3_CPU_CORES}"
-          memory: ${R3_MEMORY}
-      replicas: ${R3_ENABLED}
+      - ./keycloak-data/fhir-realm.json:/opt/keycloak/data/import/fhir-realm.json
+    networks:
+      - fhir-network
 
-  r4: # ------------------------------------------------------------------------
-    container_name: hapi-r4
+  smart-launcher:
+    container_name: smart-launcher
+    build:
+      context: ./smart-launcher-v2
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=production
+      - SECRET=${LAUNCHER_SECRET}
+      - PORT=80
+      - HOST=0.0.0.0
+      - BASE_URL=http://${HOST_IP}
+      - LAUNCHER_BASE_URL=http://${HOST_IP}
+      - PICKER_ORIGIN=http://${HOST_IP}/browser
+      - FHIR_SERVER_R4=http://${HOST_IP}/fhir/hapi-fhir-jpaserver/fhir
+      - FHIR_SERVER_R4_INTERNAL=http://r4:8080/hapi-fhir-jpaserver/fhir
+      - PICKER_CONFIG_R4=r4-local
+    networks:
+      - fhir-network
+
+  oauth2-proxy:
+    container_name: oauth2-proxy
+    image: quay.io/oauth2-proxy/oauth2-proxy:latest
+    environment:
+      - OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180
+      - OAUTH2_PROXY_PROVIDER=keycloak-oidc
+      - OAUTH2_PROXY_REVERSE_PROXY=true
+      - OAUTH2_PROXY_CLIENT_ID=${CLIENT_ID}
+      - OAUTH2_PROXY_CLIENT_SECRET=unused
+      - OAUTH2_PROXY_REDIRECT_URL=/fhir/oauth2/callback
+      - OAUTH2_PROXY_RELATIVE_REDIRECT_URL=true
+      
+      - OAUTH2_PROXY_OIDC_ISSUER_URL=http://keycloak:8180/realms/fhir
+      
+      - OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION=true
+      
+      - OAUTH2_PROXY_UPSTREAMS=http://r4:8080/
+
+      - OAUTH2_PROXY_COOKIE_SECURE=false
+      - OAUTH2_PROXY_COOKIE_SECRET=12345678901234567890123456789012
+
+      - OAUTH2_PROXY_SKIP_PROVIDER_BUTTON=true
+      - OAUTH2_PROXY_SCOPE=openid email profile
+      - OAUTH2_PROXY_OIDC_EMAIL_CLAIM=sub
+      - OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL=true
+      - OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256
+      - OAUTH2_PROXY_EMAIL_DOMAINS=*
+      - OAUTH2_PROXY_USER_ID_CLAIM=preferred_username
+    networks:
+      - fhir-network
+    depends_on:
+      - keycloak
+
+  r4:
+    container_name: r4
     image: ${R4_IMAGE}
     environment:
-      - PORT=${R4_PORT}
-      - HOST=${HOST}
-    ports:
-      - "${R4_PORT}:8080"
+      - PORT=8080
+      - oidc.enabled=true
+      - oidc.issuer=http://${HOST_IP}/realms/fhir
+      - oidc.clientId=${CLIENT_ID}
     volumes:
       - "r4-database:/usr/local/tomcat/target/database"
-    command:
-      - /bin/sh
-      - -c
-      - |
-        envsubst < /tmp/hapi.properties.tpl > /config/hapi.properties
-        envsubst < /tmp/server.xml > /usr/local/tomcat/conf/server.xml
-        catalina.sh run
-    deploy:
-      resources:
-        limits:
-          cpus: "${R4_CPU_CORES}"
-          memory: ${R4_MEMORY}
-      replicas: ${R4_ENABLED}
-
-  fhir-viewer: # ---------------------------------------------------------------
-    container_name: fhir-viewer
-    image: smartonfhir/fhir-viewer
-    ports:
-      - "${FHIR_VIEWER_PORT}:80"
-    deploy:
-      replicas: ${FHIR_VIEWER_ENABLED}
-    
-  patient-browser: # -----------------------------------------------------------
-    container_name: patient-browser
-    image: smartonfhir/patient-browser:latest
-    volumes:
-      - ./patient-browser:/usr/share/nginx/html/config
-    environment:
-      - HOST=${HOST}
-      - FHIR_VIEWER_PORT=${FHIR_VIEWER_PORT}
-      - R2_PORT=${R2_PORT}
-      - R3_PORT=${R3_PORT}
-      - R4_PORT=${R4_PORT}
-    ports:
-      - "${PATIENT_BROWSER_PORT}:80"
-    command:
-      - /bin/sh
-      - -c
-      - |
-        envsubst < /usr/share/nginx/html/config/r2.tpl > /usr/share/nginx/html/config/r2-local.json5
-        envsubst < /usr/share/nginx/html/config/r3.tpl > /usr/share/nginx/html/config/r3-local.json5
-        envsubst < /usr/share/nginx/html/config/r4.tpl > /usr/share/nginx/html/config/r4-local.json5
-        nginx -g 'daemon off;'
-    deploy:
-      replicas: ${PATIENT_BROWSER_ENABLED}
-
-  index: # ---------------------------------------------------------------------
-    container_name: home-page
-    image: nginx:alpine
-    volumes:
-      - ./www:/usr/share/nginx/html
-    ports:
-      - "${CONTROL_PANEL_PORT}:80"
-    environment:
-      - HOST=${HOST}
-      - R2_PORT=${R2_PORT}
-      - R3_PORT=${R3_PORT}
-      - R4_PORT=${R4_PORT}
-      - PATIENT_BROWSER_PORT=${PATIENT_BROWSER_PORT}
-      - FHIR_VIEWER_PORT=${FHIR_VIEWER_PORT}
-      - LAUNCHER_PORT=${LAUNCHER_PORT}
-      - R2_ENABLED=${R2_ENABLED}
-      - R3_ENABLED=${R3_ENABLED}
-      - R4_ENABLED=${R4_ENABLED}
-      - PATIENT_BROWSER_ENABLED=${PATIENT_BROWSER_ENABLED}
-      - FHIR_VIEWER_ENABLED=${FHIR_VIEWER_ENABLED}
-      - LAUNCHER_ENABLED=${LAUNCHER_ENABLED}
-      - ISSUES_URL=https://github.com/smart-on-fhir/smart-dev-sandbox/issues
-    command:
-      - /bin/sh
-      - -c
-      - |
-        envsubst < /usr/share/nginx/html/template.html > /usr/share/nginx/html/index.html
-        nginx -g 'daemon off;'
-    deploy:
-      replicas: ${CONTROL_PANEL_ENABLED}
-
-  smart-launcher: # ------------------------------------------------------------
-    container_name: launcher
-    image: smartonfhir/smart-launcher:latest
-    environment:
-      - HOST=${HOST}
-      - NODE_ENV=production
-      - LAUNCHER_BASE_URL=http://${HOST}:${LAUNCHER_PORT}
-      - BASE_URL=http://${HOST}:${LAUNCHER_PORT}
-      - FHIR_SERVER_R2=http://${HOST}:${R2_PORT}/hapi-fhir-jpaserver/fhir
-      - FHIR_SERVER_R3=http://${HOST}:${R3_PORT}/hapi-fhir-jpaserver/fhir
-      - FHIR_SERVER_R4=http://${HOST}:${R4_PORT}/hapi-fhir-jpaserver/fhir
-      - FHIR_SERVER_R2_INTERNAL=http://r2:8080/hapi-fhir-jpaserver/fhir
-      - FHIR_SERVER_R3_INTERNAL=http://r3:8080/hapi-fhir-jpaserver/fhir
-      - FHIR_SERVER_R4_INTERNAL=http://r4:8080/hapi-fhir-jpaserver/fhir
-      - DISABLE_SANDBOXES=1
-      - CDS_SANDBOX_URL=https://sandbox.cds-hooks.org
-      - PICKER_CONFIG_R2=r2-local
-      - PICKER_CONFIG_R3=r3-local
-      - PICKER_CONFIG_R4=r4-local
-      - PICKER_ORIGIN=http://${HOST}:${PATIENT_BROWSER_PORT}
-      - STU2_ENABLED=${R2_ENABLED}
-      - STU3_ENABLED=${R3_ENABLED}
-      - STU4_ENABLED=${R4_ENABLED}
-    ports:
-      - "${LAUNCHER_PORT}:80"
-    deploy:
-      replicas: ${LAUNCHER_ENABLED}
+    networks:
+      - fhir-network
 
   db:
     image: postgres:14-alpine
@@ -178,26 +125,21 @@ services:
       POSTGRES_PASSWORD: kcpassword
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
-  keycloak:
-    container_name: keycloak
-    image: quay.io/keycloak/keycloak:22.0.1
-    command: start-dev --import-realm --db=postgres
-    depends_on:
-      db:
-        condition: service_started
-    environment:
-      - KEYCLOAK_ADMIN=admin
-      - KEYCLOAK_ADMIN_PASSWORD=admin
-      - KC_HTTP_PORT=8080
-      - KC_DB=postgres
-      - KC_DB_URL=jdbc:postgresql://db/keycloak
-      - KC_DB_USERNAME=kcuser
-      - KC_DB_PASSWORD=kcpassword
-      - KC_HOSTNAME_STRICT=false
-    ports:
-      - "8180:8080" # 對外連接埠設為 8180
-    volumes:
-      - ./keycloak-data/fhir-realm.json:/opt/keycloak/data/import/fhir-realm.json
+    networks:
+      - fhir-network
 
-  
+  patient-browser:
+    container_name: patient-browser
+    image: smartonfhir/patient-browser:latest
+    volumes:
+      - ./patient-browser:/usr/share/nginx/html/config
+    environment:
+      - HOST=${HOST_IP}
+      - CONFIG_R4=r4-local
+    networks:
+      - fhir-network
+
+networks:
+  fhir-network:
+    name: fhir-network
+    external: true

@@ -1,42 +1,41 @@
 {
   "realm": "fhir",
   "enabled": true,
+  "sslRequired": "none",
+  "clientScopes": [
+    { "name": "openid", "protocol": "openid-connect" },         
+    { "name": "profile", "protocol": "openid-connect" },       
+    { "name": "email", "protocol": "openid-connect" },
+    { "name": "role_list", "protocol": "openid-connect" },
+    { "name": "launch", "protocol": "openid-connect" },
+    { "name": "patient/Patient.read", "protocol": "openid-connect" },
+    { "name": "patient/Observation.read", "protocol": "openid-connect" },
+    { "name": "patient/Condition.read", "protocol": "openid-connect" },
+    { "name": "fhirUser", "protocol": "openid-connect" }
+  ],
   "clients": [
     {
-      "clientId": "precise-hbr-app", 
+      "clientId": "app",
       "enabled": true,
-      "publicClient": true,
-      "directAccessGrantsEnabled": true,
-      "fullScopeAllowed": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "unused",
       "redirectUris": [
-        "http://localhost:8080/callback" 
-      ],
-      "webOrigins": [
         "*"
       ],
-      "protocolMappers": [
-        {
-          "name": "force-scope",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-hardcoded-claim-mapper",
-          "config": {
-            "claim.name": "scope",
-            "claim.value": "openid profile launch patient/Patient.read patient/Observation.read patient/Condition.read fhirUser",
-            "access.token.claim": "true",
-            "id.token.claim": "true",
-            "userinfo.token.claim": "true"
-          }
-        },
-        {
-          "name": "force-aud",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-audience-mapper",
-          "config": {
-            "included.client.audience": "precise-hbr-app",
-            "id.token.claim": "true",
-            "access.token.claim": "true"
-          }
-        }
+      "webOrigins": [ "*" ],
+      "publicClient": true,
+      "defaultClientScopes": [
+        "role_list",
+        "profile",
+        "email",
+        "openid",
+        "launch",
+        "patient/Patient.read"
+      ],
+      "optionalClientScopes": [
+        "patient/Observation.read",
+        "patient/Condition.read",
+        "fhirUser"
       ]
     }
   ],
@@ -44,9 +43,12 @@
     {
       "username": "fhir-admin",
       "enabled": true,
-      "credentials": [{"type": "password", "value": "fhir-admin"}],
-      "realmRoles": ["offline_access", "uma_authorization", "fhir-user"]
+      "email": "fhir-admin@local.test",
+      "emailVerified": true,
+      "credentials": [
+        { "type": "password", "value": "pa55word", "temporary": false }
+      ],
+      "realmRoles": [ "admin" ]
     }
-  ],
-  "roles": { "realm": [{"name": "fhir-user"}] }
+  ]
 }
