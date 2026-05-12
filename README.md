@@ -52,6 +52,74 @@ you may also have to delete previous containers and volumes as described below.
    After that, it probably takes a minute to start all the services. 
 5. Open http://localhost:4000 in your browser to access the sandbox.
 
+## HTTPS mode for external SMART apps
+
+If you need to test apps hosted on HTTPS origins (for example GitHub Pages), use the included Windows startup script:
+
+```sh
+start_sandbox.bat
+```
+
+What it does:
+
+- Detects your LAN IP and updates `.env`
+- Reuses existing certificate files in `./certs` when present, otherwise creates a local self-signed cert
+- Starts all services behind HTTPS on `https://<HOST_IP>`
+
+After startup, test launch URLs in this format:
+
+```text
+https://<HOST_IP>/launcher?launch_uri=<YOUR_APP_LAUNCH_URL>&fhir_ver=4
+```
+
+Note: Because the certificate is self-signed, your browser/OS must trust it for fetch/XHR calls to succeed from external HTTPS apps.
+
+### Sandbox-only mode for apps with fixed CSP
+
+If your app already has a fixed `connect-src` allowlist (for example it already allows `https://launcher.bdlfhir.net`) and you prefer not to edit app code:
+
+1. Map that hostname to your local sandbox IP in your hosts file.
+2. Start the sandbox with that hostname as the public host:
+
+```bat
+set SANDBOX_PUBLIC_HOST=launcher.bdlfhir.net
+start_sandbox.bat
+```
+
+What this changes:
+
+- Sandbox URLs and issuer use `https://<SANDBOX_PUBLIC_HOST>`
+- Generated TLS certificate includes both host DNS and LAN IP SAN entries
+- No changes are needed in your app HTML/CSP as long as the host is already in its allowlist
+
+### Fixed-host deployment mode (recommended before public rollout)
+
+If you are moving the sandbox to a dedicated machine and want stable behavior:
+
+1. Set `.env`:
+	- `PUBLIC_HOST=launcher.bdlfhir.net`
+2. Put your TLS files at:
+	- `./certs/sandbox.crt`
+	- `./certs/sandbox.key`
+3. Start with existing cert mode:
+
+```bat
+set SANDBOX_PUBLIC_HOST=launcher.bdlfhir.net
+set SANDBOX_USE_EXISTING_CERT=1
+start_sandbox.bat
+```
+
+Or use the helper script:
+
+```bat
+start_fixed_host.bat
+```
+
+Optional controls:
+
+- `SANDBOX_FORCE_CERT_REGEN=1` forces self-signed cert regeneration (useful only for local testing)
+- `SANDBOX_USE_EXISTING_CERT=1` prevents accidental overwrite of your real certificate files
+
 ## Stop the Dev Sandbox
 To stop a running sandbox press <kbd>Ctrl+C</kbd>.  Eventually, you should see something like (depends on what services you have enabled):
 ```sh

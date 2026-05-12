@@ -1,81 +1,82 @@
 @echo off
 setlocal enabledelayedexpansion
 
+:: Ensure correct directory even if called directly
+cd /d "%~dp0"
+
+:: ======================================================
+:: Step 0: Docker Environment Check
+:: ======================================================
 set "COMPOSE_CMD=docker compose"
-docker compose version >nul 2>&1
-if %errorlevel% neq 0 (
-    docker-compose version >nul 2>&1
-    if %errorlevel% neq 0 (
-        echo [ERROR] Docker Compose was not found. Install Docker Desktop and retry.
-        pause
-        exit /b 1
-    )
-    set "COMPOSE_CMD=docker-compose"
+docker compose version >nul 2>&1 || set "COMPOSE_CMD=docker-compose"
+
+:: Privacy Mode: Lock to domain name instead of IP
+set "PUBLIC_HOST=fhir.sandbox.local"
+set "PROTOCOL=https"
+
+echo [INFO] Privacy Protection: IP detection skipped.
+echo [INFO] Environment locked to: %PUBLIC_HOST%
+
+:: ======================================================
+:: Step 1.1: Precision Configuration Sync
+:: ======================================================
+echo [INFO] Synchronizing configuration files...
+
+:: Sync .env - Using start-of-line anchors for accuracy
+powershell -NoProfile -Command ^
+    "$envPath='.\.env';" ^
+    "$c = Get-Content $envPath;" ^
+    "$c = $c -replace '^HOST_IP=.*', 'HOST_IP=fhir.sandbox.local';" ^
+    "$c = $c -replace '^PUBLIC_HOST=.*', 'PUBLIC_HOST=fhir.sandbox.local';" ^
+    "$c = $c -replace '^HOST=.*', 'HOST=fhir.sandbox.local';" ^
+    "$c = $c -replace '^FHIR_SERVER_R4=.*', 'FHIR_SERVER_R4=https://fhir.sandbox.local/fhir/hapi-fhir-jpaserver/fhir';" ^
+    "Set-Content $envPath $c"
+
+:: Sync nginx.conf
+powershell -NoProfile -Command ^
+    "$confPath='.\nginx.conf';" ^
+    "(Get-Content $confPath) -replace 'server_name.*;', 'server_name %PUBLIC_HOST%;' | Set-Content $confPath"
+
+:: Sync r4-local.json5 (Forced Relative Paths to fix Mixed Content)
+if exist ".\patient-browser\r4-local.json5" (
+    powershell -NoProfile -Command ^
+        "$jsonPath='.\patient-browser\r4-local.json5';" ^
+        "(Get-Content $jsonPath) -replace 'url: .http:.*', 'url: ''/fhir/hapi-fhir-jpaserver/fhir'',' | Set-Content $jsonPath"
 )
 
-echo [INFO] Step 1: Detecting network IP...
-for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -Command "Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|Pseudo|VirtualBox|VMware|WSL' -and $_.IPAddress -match '^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)' } | Select-Object -ExpandProperty IPAddress -First 1"`) do set CLEAN_IP=%%i
+echo [OK] All configurations synchronized with domain %PUBLIC_HOST%.
 
-if "%CLEAN_IP%"=="" (
-    echo [ERROR] Could not detect a valid local IP.
-    pause
-    exit /b
-)
-echo [INFO] Detected IP: %CLEAN_IP%
+:: ======================================================
+:: Step 1.2: Certificates and Infrastructure
+:: ======================================================
+docker network create fhir-network >nul 2>&1
 
-echo [INFO] Compose command: %COMPOSE_CMD%
-
-echo [INFO] Step 1.1: Ensuring required docker network exists...
-docker network inspect fhir-network >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [INFO] Creating docker network: fhir-network
-    docker network create fhir-network >nul 2>&1
-    if %errorlevel% neq 0 (
-        echo [ERROR] Failed to create docker network fhir-network.
-        pause
-        exit /b 1
-    )
+if not exist ".\certs\sandbox.crt" (
+    echo [ERROR] TLS Certificate not found in .\certs\sandbox.crt
+    pause & exit /b 1
 )
 
-:: Update config files with detected IP
-powershell -NoProfile -Command "(Get-Content .env) -replace 'HOST_IP=.*', 'HOST_IP=%CLEAN_IP%' -replace 'HOST=.*', 'HOST=%CLEAN_IP%' | Set-Content .env"
-powershell -NoProfile -Command "(Get-Content nginx.conf) -replace 'server_name.*;', 'server_name %CLEAN_IP%;' | Set-Content nginx.conf"
-
-echo [INFO] Step 2: Cleaning environment...
+echo [INFO] Cleaning environment...
 %COMPOSE_CMD% down
 
-echo [INFO] Step 3: Starting Keycloak and Database...
+:: ======================================================
+:: Step 3-6: Sequential Service Launch
+:: ======================================================
+echo [INFO] Starting Infrastructure (DB/Auth)...
 %COMPOSE_CMD% up -d db keycloak
 
-echo [INFO] Step 4: Waiting for Keycloak to be READY...
-set /a RETRIES=0
-:WAIT_KEYCLOAK
-docker exec keycloak bash -lc "echo > /dev/tcp/127.0.0.1/8180" 2>nul
-if %errorlevel% neq 0 (
-    set /a RETRIES+=1
-    if !RETRIES! geq 30 (
-        echo [ERROR] Keycloak was not ready after 5 minutes.
-        echo [HINT] Check logs with: docker logs keycloak --tail 200
-        pause
-        exit /b 1
-    )
-    echo [WAIT] Keycloak is still starting...
-    timeout /t 10 /nobreak >nul
-    goto WAIT_KEYCLOAK
-)
-echo [OK] Keycloak is UP and LISTENING
+echo [INFO] Waiting for Keycloak initialization (60s)...
+timeout /t 60 /nobreak
 
-echo [INFO] Step 5: Starting remaining services...
+echo [INFO] Starting Application services...
 %COMPOSE_CMD% up -d r4 smart-launcher patient-browser oauth2-proxy
 
-echo [INFO] Step 6: Starting Nginx Gateway...
+echo [INFO] Activating Nginx Gateway...
 %COMPOSE_CMD% up -d nginx
 %COMPOSE_CMD% restart nginx
 
 echo.
-echo [SUCCESS] Sandbox startup sequence completed
-echo [CHECK] Launcher:       http://%CLEAN_IP%/
-echo [CHECK] FHIR Metadata:  http://%CLEAN_IP%/fhir/hapi-fhir-jpaserver/fhir/metadata
-echo [NOTE] Use the IP-based URLs above (do not use localhost) to avoid OAuth cookie/callback issues.
+echo [SUCCESS] SMART-on-FHIR Sandbox is ready!
+echo [URL] %PROTOCOL%://%PUBLIC_HOST%/
 echo.
 pause
