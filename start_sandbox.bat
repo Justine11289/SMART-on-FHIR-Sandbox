@@ -1,54 +1,29 @@
 @echo off
 setlocal enabledelayedexpansion
 
-:: Ensure correct directory even if called directly
 cd /d "%~dp0"
 
-:: ======================================================
-:: Step 0: Docker Environment Check
-:: ======================================================
 set "COMPOSE_CMD=docker compose"
 docker compose version >nul 2>&1 || set "COMPOSE_CMD=docker-compose"
 
-:: Privacy Mode: Lock to domain name instead of IP
 set "PUBLIC_HOST=fhir.sandbox.local"
 set "PROTOCOL=https"
 
 echo [INFO] Privacy Protection: IP detection skipped.
 echo [INFO] Environment locked to: %PUBLIC_HOST%
-
-:: ======================================================
-:: Step 1.1: Precision Configuration Sync
-:: ======================================================
 echo [INFO] Synchronizing configuration files...
 
-:: Sync .env - Using start-of-line anchors for accuracy
-powershell -NoProfile -Command ^
-    "$envPath='.\.env';" ^
-    "$c = Get-Content $envPath;" ^
-    "$c = $c -replace '^HOST_IP=.*', 'HOST_IP=fhir.sandbox.local';" ^
-    "$c = $c -replace '^PUBLIC_HOST=.*', 'PUBLIC_HOST=fhir.sandbox.local';" ^
-    "$c = $c -replace '^HOST=.*', 'HOST=fhir.sandbox.local';" ^
-    "$c = $c -replace '^FHIR_SERVER_R4=.*', 'FHIR_SERVER_R4=https://fhir.sandbox.local/fhir/hapi-fhir-jpaserver/fhir';" ^
-    "Set-Content $envPath $c"
+:: 同步設定檔
+powershell -NoProfile -Command "$envPath='.\.env'; $c = Get-Content $envPath; $c = $c -replace '^HOST_IP=.*', 'HOST_IP=fhir.sandbox.local'; $c = $c -replace '^PUBLIC_HOST=.*', 'PUBLIC_HOST=fhir.sandbox.local'; $c = $c -replace '^HOST=.*', 'HOST=fhir.sandbox.local'; $c = $c -replace '^FHIR_SERVER_R4=.*', 'FHIR_SERVER_R4=https://fhir.sandbox.local/fhir/hapi-fhir-jpaserver/fhir'; Set-Content $envPath $c"
 
-:: Sync nginx.conf
-powershell -NoProfile -Command ^
-    "$confPath='.\nginx.conf';" ^
-    "(Get-Content $confPath) -replace 'server_name.*;', 'server_name %PUBLIC_HOST%;' | Set-Content $confPath"
+powershell -NoProfile -Command "$confPath='.\nginx.conf'; (Get-Content $confPath) -replace 'server_name.*;', 'server_name %PUBLIC_HOST%;' | Set-Content $confPath"
 
-:: Sync r4-local.json5 (Forced Relative Paths to fix Mixed Content)
 if exist ".\patient-browser\r4-local.json5" (
-    powershell -NoProfile -Command ^
-        "$jsonPath='.\patient-browser\r4-local.json5';" ^
-        "(Get-Content $jsonPath) -replace 'url: .http:.*', 'url: ''/fhir/hapi-fhir-jpaserver/fhir'',' | Set-Content $jsonPath"
+    powershell -NoProfile -Command "$jsonPath='.\patient-browser\r4-local.json5'; (Get-Content $jsonPath) -replace 'url: .http:.*', 'url: ''/fhir/hapi-fhir-jpaserver/fhir'',' | Set-Content $jsonPath"
 )
 
 echo [OK] All configurations synchronized with domain %PUBLIC_HOST%.
 
-:: ======================================================
-:: Step 1.2: Certificates and Infrastructure
-:: ======================================================
 docker network create fhir-network >nul 2>&1
 
 if not exist ".\certs\sandbox.crt" (
@@ -56,27 +31,38 @@ if not exist ".\certs\sandbox.crt" (
     pause & exit /b 1
 )
 
-echo [INFO] Cleaning environment...
+echo [INFO] Stopping containers safely (preserving FHIR data)...
 %COMPOSE_CMD% down
 
-:: ======================================================
-:: Step 3-6: Sequential Service Launch
-:: ======================================================
-echo [INFO] Starting Infrastructure (DB/Auth)...
-%COMPOSE_CMD% up -d db keycloak
-
-echo [INFO] Waiting for Keycloak initialization (60s)...
-timeout /t 60 /nobreak
-
-echo [INFO] Starting Application services...
-%COMPOSE_CMD% up -d r4 smart-launcher patient-browser oauth2-proxy
-
-echo [INFO] Activating Nginx Gateway...
-%COMPOSE_CMD% up -d nginx
-%COMPOSE_CMD% restart nginx
+echo ==========================================================================
+echo  [STAGE 1] Launching Core Engines (DB / Keycloak / FHIR R4)
+echo ==========================================================================
+%COMPOSE_CMD% up -d --force-recreate db keycloak r4 smart-launcher patient-browser
 
 echo.
-echo [SUCCESS] SMART-on-FHIR Sandbox is ready!
-echo [URL] %PROTOCOL%://%PUBLIC_HOST%/
+echo [WAIT] Giving Keycloak Java VM 85 seconds to fully initialize and open Port 8180...
+echo [INFO] Please stand by. Do NOT run verify.py yet...
 echo.
+
+:: 倒數 85 秒，確保 Keycloak 在背景完全可以用
+timeout /t 85 /nobreak
+
+echo.
+echo [OK] Core Engines are ready.
+echo ==========================================================================
+echo  [STAGE 2] Launching Net Gateway (nginx-proxy)
+echo ==========================================================================
+:: 🌟 修正：只單獨拉起 Nginx 反向代理，乾淨俐落
+%COMPOSE_CMD% up -d --force-recreate nginx
+
+echo.
+echo [WAIT] Final verification of infrastructure gate...
+timeout /t 5 >nul
+
+echo.
+%COMPOSE_CMD% ps
+echo.
+echo ==========================================================================
+echo  SMART-on-FHIR Sandbox is ready! Port 443 is wide open.
+echo ==========================================================================
 pause

@@ -2,6 +2,11 @@
   "realm": "fhir",
   "enabled": true,
   "sslRequired": "none",
+  "ssoSessionIdleTimeout": 3600,
+  "ssoSessionMaxLifespan": 86400,
+  "accessTokenLifespan": 3600,
+  "clientSessionIdleTimeout": 3600,
+  "clientSessionMaxLifespan": 86400,
   "clientScopes": [
     { "name": "openid", "protocol": "openid-connect" },         
     { "name": "profile", "protocol": "openid-connect" },       

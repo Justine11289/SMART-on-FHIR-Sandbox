@@ -8,6 +8,7 @@ services:
   nginx:
     image: nginx:alpine
     container_name: nginx-proxy
+    restart: on-failure
     ports:
       - "80:80"
       - "443:443"
@@ -20,8 +21,6 @@ services:
         condition: service_started
       smart-launcher:
         condition: service_started
-      oauth2-proxy:
-        condition: service_started
     networks:
       - fhir-network
 
@@ -29,6 +28,7 @@ services:
     container_name: keycloak
     image: quay.io/keycloak/keycloak:22.0.1
     command: start-dev --import-realm --db=postgres --http-port 8180 --http-enabled=true
+    # command: start --optimized
     depends_on:
       db:
         condition: service_started
@@ -50,6 +50,7 @@ services:
       - KC_PROXY=edge
     volumes:
       - ./keycloak-data/fhir-realm.json:/opt/keycloak/data/import/fhir-realm.json
+      - ./keycloak-data:/opt/keycloak/data
     networks:
       - fhir-network
 
@@ -72,39 +73,6 @@ services:
       - CONNECT_SRC=" 'self' https://${PUBLIC_HOST} https://cdn.jsdelivr.net "
     networks:
       - fhir-network
-
-  oauth2-proxy:
-    container_name: oauth2-proxy
-    image: quay.io/oauth2-proxy/oauth2-proxy:latest
-    environment:
-      - OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180
-      - OAUTH2_PROXY_SSL_INSECURE_SKIP_VERIFY=true
-      - OAUTH2_PROXY_PROVIDER=keycloak-oidc
-      - OAUTH2_PROXY_REVERSE_PROXY=true
-      - OAUTH2_PROXY_CLIENT_ID=${CLIENT_ID}
-      - OAUTH2_PROXY_CLIENT_SECRET=unused
-      - OAUTH2_PROXY_REDIRECT_URL=https://${PUBLIC_HOST}/fhir/oauth2/callback
-      - OAUTH2_PROXY_RELATIVE_REDIRECT_URL=true
-      - OAUTH2_PROXY_OIDC_ISSUER_URL=http://keycloak:8180/realms/fhir
-      
-      - OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION=true
-      
-      - OAUTH2_PROXY_UPSTREAMS=http://r4:8080/
-
-      - OAUTH2_PROXY_COOKIE_SECURE=true
-      - OAUTH2_PROXY_COOKIE_SECRET=12345678901234567890123456789012
-
-      - OAUTH2_PROXY_SKIP_PROVIDER_BUTTON=true
-      - OAUTH2_PROXY_SCOPE=openid email profile
-      - OAUTH2_PROXY_OIDC_EMAIL_CLAIM=sub
-      - OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL=true
-      - OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256
-      - OAUTH2_PROXY_EMAIL_DOMAINS=*
-      - OAUTH2_PROXY_USER_ID_CLAIM=preferred_username
-    networks:
-      - fhir-network
-    depends_on:
-      - keycloak
 
   r4:
     container_name: r4
