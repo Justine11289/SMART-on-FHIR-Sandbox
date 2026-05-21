@@ -5,7 +5,7 @@ import json
 import base64
 
 # ==================== Sandbox Global Configurations ====================
-BASE_URL = "https://fhir.sandbox.local"
+BASE_URL = "https://smartonfhir.sandbox.local"
 TARGET_REALM = "fhir"  
 ADMIN_USER = "admin"
 ADMIN_PASS = "admin"

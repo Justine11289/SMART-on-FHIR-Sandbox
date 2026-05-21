@@ -6,7 +6,7 @@ cd /d "%~dp0"
 set "COMPOSE_CMD=docker compose"
 docker compose version >nul 2>&1 || set "COMPOSE_CMD=docker-compose"
 
-set "PUBLIC_HOST=fhir.sandbox.local"
+set "PUBLIC_HOST=smartonfhir.sandbox.local"
 set "PROTOCOL=https"
 
 echo [INFO] Privacy Protection: IP detection skipped.
@@ -14,7 +14,7 @@ echo [INFO] Environment locked to: %PUBLIC_HOST%
 echo [INFO] Synchronizing configuration files...
 
 :: 同步設定檔
-powershell -NoProfile -Command "$envPath='.\.env'; $c = Get-Content $envPath; $c = $c -replace '^HOST_IP=.*', 'HOST_IP=fhir.sandbox.local'; $c = $c -replace '^PUBLIC_HOST=.*', 'PUBLIC_HOST=fhir.sandbox.local'; $c = $c -replace '^HOST=.*', 'HOST=fhir.sandbox.local'; $c = $c -replace '^FHIR_SERVER_R4=.*', 'FHIR_SERVER_R4=https://fhir.sandbox.local/fhir/hapi-fhir-jpaserver/fhir'; Set-Content $envPath $c"
+powershell -NoProfile -Command "$envPath='.\.env'; $c = Get-Content $envPath; $c = $c -replace '^HOST_IP=.*', 'HOST_IP=smartonfhir.sandbox.local'; $c = $c -replace '^PUBLIC_HOST=.*', 'PUBLIC_HOST=smartonfhir.sandbox.local'; $c = $c -replace '^HOST=.*', 'HOST=smartonfhir.sandbox.local'; $c = $c -replace '^FHIR_SERVER_R4=.*', 'FHIR_SERVER_R4=https://smartonfhir.sandbox.local/fhir/hapi-fhir-jpaserver/fhir'; Set-Content $envPath $c"
 
 powershell -NoProfile -Command "$confPath='.\nginx.conf'; (Get-Content $confPath) -replace 'server_name.*;', 'server_name %PUBLIC_HOST%;' | Set-Content $confPath"
 
