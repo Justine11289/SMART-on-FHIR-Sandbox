@@ -1,98 +1,257 @@
-import requests
-import uuid
 import urllib.parse
+import urllib.request
+import urllib.error
 import json
 import base64
+import os
+import uuid
+import ssl
+import sys
 
 # ==================== Sandbox Global Configurations ====================
-BASE_URL = "https://smartonfhir.sandbox.local"
-TARGET_REALM = "fhir"  
-ADMIN_USER = "admin"
-ADMIN_PASS = "admin"
+BASE_URL = os.environ.get("VERIFY_BASE_URL", "https://smartonfhir.sandbox.local")
+KEYCLOAK_REALM = os.environ.get("VERIFY_KEYCLOAK_REALM", "fhir")
+KEYCLOAK_ADMIN_REALM = os.environ.get("VERIFY_KEYCLOAK_ADMIN_REALM", "master")
+KEYCLOAK_ADMIN_CLIENT_ID = os.environ.get("VERIFY_KEYCLOAK_ADMIN_CLIENT_ID", "admin-cli")
+KEYCLOAK_ADMIN_USERNAME = os.environ.get("VERIFY_KEYCLOAK_ADMIN_USERNAME", "admin")
+KEYCLOAK_ADMIN_PASSWORD = os.environ.get("VERIFY_KEYCLOAK_ADMIN_PASSWORD", "admin")
+KEYCLOAK_CALLBACK_URI = os.environ.get(
+    "VERIFY_KEYCLOAK_CALLBACK_URI", f"{BASE_URL}/v/r4/auth/keycloak-callback"
+)
 
-requests.packages.urllib3.disable_warnings()
+REQUESTED_SCOPES = [
+    "launch",
+    "launch/patient",
+    "patient/*.read",
+    "fhirUser",
+    "online_access",
+    "openid",
+]
 
-def get_admin_token():
-    url = f"{BASE_URL}/realms/master/protocol/openid-connect/token"
-    payload = {
-        "grant_type": "password",
-        "client_id": "admin-cli",
-        "username": ADMIN_USER,
-        "password": ADMIN_PASS
-    }
-    response = requests.post(url, data=payload, verify=False)
-    if response.status_code != 200:
-        raise Exception(f"Keycloak Master Authentication Failed: {response.text}")
-    return response.json().get("access_token")
+SSL_CONTEXT = ssl._create_unverified_context()
 
-def run_session():
-    print("==========================================================================")
-    print(" SMART-on-FHIR 正統醫院流派：獨立發動連接器 (Pure Standalone Mode)")
-    print("==========================================================================")
-    
-    app_url = input("Enter App Launch.html URL: ").strip()
-    redirect_uri = input("Enter Redirect URI (index.html): ").strip()
+
+def base64url_encode(text: str) -> str:
+    encoded = base64.urlsafe_b64encode(text.encode("utf-8")).decode("ascii")
+    return encoded.rstrip("=")
+
+
+def http_request(*, method: str, url: str, headers: dict | None = None, data: bytes | None = None):
+    req = urllib.request.Request(url, data=data, method=method)
+    for key, value in (headers or {}).items():
+        req.add_header(key, value)
 
     try:
-        token = get_admin_token()
-    except Exception as e:
-        print(f"\n❌ Connection Error: {e}")
+        with urllib.request.urlopen(req, context=SSL_CONTEXT) as response:
+            body = response.read().decode("utf-8")
+            return response.status, body, dict(response.headers)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8")
+        return exc.code, body, dict(exc.headers)
+
+
+def get_keycloak_admin_token() -> str:
+    token_url = f"{BASE_URL}/realms/{KEYCLOAK_ADMIN_REALM}/protocol/openid-connect/token"
+    form = urllib.parse.urlencode(
+        {
+            "grant_type": "password",
+            "client_id": KEYCLOAK_ADMIN_CLIENT_ID,
+            "username": KEYCLOAK_ADMIN_USERNAME,
+            "password": KEYCLOAK_ADMIN_PASSWORD,
+        }
+    ).encode("utf-8")
+
+    status, body, _ = http_request(
+        method="POST",
+        url=token_url,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data=form,
+    )
+
+    if status != 200:
+        raise RuntimeError(f"Keycloak admin token request failed ({status}): {body}")
+
+    payload = json.loads(body)
+    token = payload.get("access_token")
+    if not token:
+        raise RuntimeError("Keycloak admin token response did not include access_token")
+
+    return token
+
+
+def keycloak_api(*, method: str, path: str, token: str, payload: dict | None = None):
+    url = f"{BASE_URL}/admin/realms/{KEYCLOAK_REALM}{path}"
+    data = None
+    headers = {"Authorization": f"Bearer {token}"}
+
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    return http_request(method=method, url=url, headers=headers, data=data)
+
+
+def ensure_client_scope(token: str, scope_name: str) -> None:
+    status, body, _ = keycloak_api(
+        method="POST",
+        path="/client-scopes",
+        token=token,
+        payload={"name": scope_name, "protocol": "openid-connect"},
+    )
+
+    if status not in (201, 409):
+        raise RuntimeError(f"Failed to create Keycloak client scope '{scope_name}' ({status}): {body}")
+
+
+def find_client_scope_id(token: str, scope_name: str) -> str:
+    status, body, _ = keycloak_api(method="GET", path="/client-scopes", token=token)
+    if status != 200:
+        raise RuntimeError(f"Failed to list Keycloak client scopes ({status}): {body}")
+
+    scopes = json.loads(body)
+    for scope in scopes:
+        if scope.get("name") == scope_name:
+            scope_id = scope.get("id")
+            if scope_id:
+                return scope_id
+
+    raise RuntimeError(f"Could not find Keycloak client scope id for '{scope_name}'")
+
+
+def create_client(token: str, *, client_id: str, redirect_uri: str) -> str:
+    redirect_uris = [redirect_uri]
+    if KEYCLOAK_CALLBACK_URI not in redirect_uris:
+        redirect_uris.append(KEYCLOAK_CALLBACK_URI)
+
+    status, body, headers = keycloak_api(
+        method="POST",
+        path="/clients",
+        token=token,
+        payload={
+            "clientId": client_id,
+            "enabled": True,
+            "protocol": "openid-connect",
+            "publicClient": True,
+            "standardFlowEnabled": True,
+            "directAccessGrantsEnabled": False,
+            "serviceAccountsEnabled": False,
+            "implicitFlowEnabled": False,
+            "authorizationServicesEnabled": False,
+            "fullScopeAllowed": True,
+            "redirectUris": redirect_uris,
+            "webOrigins": ["*"],
+        },
+    )
+
+    if status not in (201, 204, 409):
+        raise RuntimeError(f"Failed to create Keycloak client '{client_id}' ({status}): {body}")
+
+    location = headers.get("Location") or headers.get("location")
+    if location and "/clients/" in location:
+        return location.rsplit("/", 1)[-1]
+
+    status, body, _ = keycloak_api(method="GET", path=f"/clients?clientId={urllib.parse.quote(client_id)}", token=token)
+    if status != 200:
+        raise RuntimeError(f"Failed to resolve Keycloak client id for '{client_id}' ({status}): {body}")
+
+    clients = json.loads(body)
+    if not clients:
+        raise RuntimeError(f"Keycloak did not return a client for '{client_id}'")
+
+    client_uuid = clients[0].get("id")
+    if not client_uuid:
+        raise RuntimeError(f"Keycloak client '{client_id}' did not include an internal id")
+    return client_uuid
+
+
+def attach_default_scope(token: str, client_uuid: str, scope_uuid: str, scope_name: str) -> None:
+    status, body, _ = keycloak_api(
+        method="PUT",
+        path=f"/clients/{client_uuid}/default-client-scopes/{scope_uuid}",
+        token=token,
+    )
+    if status not in (204, 201, 409):
+        raise RuntimeError(f"Failed to attach default scope '{scope_name}' ({status}): {body}")
+
+
+def register_with_keycloak(*, client_id: str, redirect_uri: str) -> None:
+    token = get_keycloak_admin_token()
+
+    for scope_name in REQUESTED_SCOPES:
+        ensure_client_scope(token, scope_name)
+
+    client_uuid = create_client(token, client_id=client_id, redirect_uri=redirect_uri)
+
+    for scope_name in REQUESTED_SCOPES:
+        scope_uuid = find_client_scope_id(token, scope_name)
+        attach_default_scope(token, client_uuid, scope_uuid, scope_name)
+
+    print(f"已在 Keycloak 註冊 client：{client_id}")
+
+
+def encode_launch_params(*, client_id: str, redirect_uri: str) -> str:
+    # Matches smart-launcher-v2/src/isomorphic/codec.ts for provider-ehr launch.
+    launch_params = [
+        0,              # provider-ehr
+        "",            # patient
+        "",            # provider
+        "AUTO",        # encounter
+        0,              # skip_login
+        0,              # skip_auth
+        0,              # sim_ehr
+        "",            # scope
+        redirect_uri,    # redirect_uris
+        client_id,       # client_id
+        "",            # client_secret
+        "",            # auth_error
+        "",            # jwks_url
+        "",            # jwks
+        0,              # client_type -> public
+        1,              # pkce -> auto
+        ""             # fhir_server
+    ]
+
+    return base64url_encode(json.dumps(launch_params, separators=(",", ":")))
+
+
+def build_launcher_url(*, app_url: str, redirect_uri: str, client_id: str, fhir_version: str = "r4") -> str:
+    launch = encode_launch_params(client_id=client_id, redirect_uri=redirect_uri)
+    query = urllib.parse.urlencode(
+        {
+            "fhir_version": fhir_version,
+            "launch_url": app_url,
+            "launch": launch,
+        },
+        quote_via=urllib.parse.quote,
+    )
+    return f"{BASE_URL}/?{query}"
+
+
+def run_session():
+       
+    app_url = input("App Launch URL: ").strip()
+    redirect_uri = input("Redirect URI: ").strip()
+    client_id = str(uuid.uuid4())
+    
+    if not app_url or not redirect_uri:
+        print("錯誤：網址不能為空！")
         return
 
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    reg_url = f"{BASE_URL}/admin/realms/{TARGET_REALM}/clients"
-    
-    test_id = str(uuid.uuid4())
-    
-    # 建立純粹的 OAuth2 Public Client
-    client_payload = {
-        "clientId": test_id,
-        "enabled": True,
-        "publicClient": True,                   
-        "bearerOnly": False,
-        "standardFlowEnabled": True,            
-        "directAccessGrantsEnabled": True,
-        "redirectUris": [
-            f"{redirect_uri}*",                           
-            f"{BASE_URL}*",                            
-            f"{app_url}*"
-        ],
-        "webOrigins": ["*"]                     
-    }
-    
-    reg_res = requests.post(reg_url, json=client_payload, headers=headers, verify=False)
-    if reg_res.status_code != 201:
-        print(f"\n❌ Client Registration Failed: {reg_res.text}")
-        return
+    try:
+        register_with_keycloak(client_id=client_id, redirect_uri=redirect_uri)
+    except Exception as exc:
+        print(f"Keycloak 註冊失敗：{exc}")
+        sys.exit(1)
 
-    # 雙重鎖定 Public Client 屬性
-    internal_query = requests.get(f"{reg_url}?clientId={test_id}", headers=headers, verify=False).json()
-    internal_id = internal_query[0]['id']
-    full_config = internal_query[0]
-    full_config["standardFlowEnabled"] = True
-    full_config["publicClient"] = True
-    full_config["grantTypes"] = ["authorization_code", "refresh_token"]
-    requests.put(f"{reg_url}/{internal_id}", json=full_config, headers=headers, verify=False)
+    launcher_url = build_launcher_url(app_url=app_url, redirect_uri=redirect_uri, client_id=client_id)
 
-    print(f"\n[OK] 臨時 Public Client {test_id} 已成功註冊至 Keycloak 核心。")
-
-    # 🌟 正統關鍵：直接把發動目標（iss）指向真正受到 Keycloak 保護的 HAPI-FHIR 門牌！
-    # 這樣妳的 App 就會直接去讀取 HAPI-FHIR 的 smart-configuration，進而直衝 Keycloak 大門！
-    real_fhir_server = f"{BASE_URL}/fhir/hapi-fhir-jpaserver/fhir"
+    print(f"\n" + "="*80)
+    print("SMART Launcher 連結已產生：")
+    print(f"\n\033[92m{launcher_url}\033[0m")
+    print(f"="*80)
     
-    params = urllib.parse.urlencode({
-        "iss": real_fhir_server,
-        "clientId": test_id
-    })
-    
-    print(f"\n🚀 正統醫院流派發動連結已就緒 (完全繞過 smart-launcher 雜音)：")
-    print(f"\n\033[94m{app_url}?{params}\033[0m")
-    
-    print("\n" + "-"*60)
-    input("👉 請【複製上方藍色連結】，並打開【瀏覽器無痕視窗】貼上。測試完成後在此按 [ENTER] 銷毀 Session...")
-    
-    requests.delete(f"{reg_url}/{internal_id}", headers=headers, verify=False)
-    print(f"\n✅ 測試結束。Client {test_id} 已從 Keycloak 安全下線清空。")
+    input("\n如果要繼續測試，請先保持這個視窗開著；按下 [ENTER] 只會結束腳本。")
+    print(f"\n已完成。若要重新產生連結，重新執行 verify.py 即可。")
 
 if __name__ == "__main__":
     run_session()

@@ -16,10 +16,12 @@ echo [INFO] Synchronizing configuration files...
 :: 同步設定檔
 powershell -NoProfile -Command "$envPath='.\.env'; $c = Get-Content $envPath; $c = $c -replace '^HOST_IP=.*', 'HOST_IP=smartonfhir.sandbox.local'; $c = $c -replace '^PUBLIC_HOST=.*', 'PUBLIC_HOST=smartonfhir.sandbox.local'; $c = $c -replace '^HOST=.*', 'HOST=smartonfhir.sandbox.local'; $c = $c -replace '^FHIR_SERVER_R4=.*', 'FHIR_SERVER_R4=https://smartonfhir.sandbox.local/fhir/hapi-fhir-jpaserver/fhir'; Set-Content $envPath $c"
 
+powershell -NoProfile -Command "$envPath='.\.env'; $c = Get-Content $envPath; $pairs = @{'KEYCLOAK_ADMIN'='admin'; 'KEYCLOAK_ADMIN_PASSWORD'='admin'; 'KC_BOOTSTRAP_ADMIN_USERNAME'='fhir-admin'; 'KC_BOOTSTRAP_ADMIN_PASSWORD'='pa55word'}; foreach ($key in $pairs.Keys) { if ($c -match ('^' + [regex]::Escape($key) + '=.*')) { $c = $c -replace ('^' + [regex]::Escape($key) + '=.*'), ($key + '=' + $pairs[$key]) } else { $c += ($key + '=' + $pairs[$key]) } }; Set-Content $envPath $c"
+
 powershell -NoProfile -Command "$confPath='.\nginx.conf'; (Get-Content $confPath) -replace 'server_name.*;', 'server_name %PUBLIC_HOST%;' | Set-Content $confPath"
 
 if exist ".\patient-browser\r4-local.json5" (
-    powershell -NoProfile -Command "$jsonPath='.\patient-browser\r4-local.json5'; (Get-Content $jsonPath) -replace 'url: .http:.*', 'url: ''/fhir/hapi-fhir-jpaserver/fhir'',' | Set-Content $jsonPath"
+    powershell -NoProfile -Command "$jsonPath='.\patient-browser\r4-local.json5'; (Get-Content $jsonPath) -replace 'url: .http:.*', 'url: ''/v/r4/fhir'',' | Set-Content $jsonPath"
 )
 
 echo [OK] All configurations synchronized with domain %PUBLIC_HOST%.

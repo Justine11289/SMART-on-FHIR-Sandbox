@@ -28,6 +28,12 @@ configuration file called `.env`. Once you make changes, you will need to restar
 `docker compose down` and `docker compose up -d`. If you change the used databases (by selecting different HAPI images)
 you may also have to delete previous containers and volumes as described below.
 
+The sandbox also uses these Keycloak admin variables from `.env` when bootstrapping the realm:
+- `KEYCLOAK_ADMIN`
+- `KEYCLOAK_ADMIN_PASSWORD`
+- `KC_BOOTSTRAP_ADMIN_USERNAME`
+- `KC_BOOTSTRAP_ADMIN_PASSWORD`
+
 ## Start the Dev Sandbox
 1. If you don't already have Docker on your system, download and install it from https://store.docker.com/search?type=edition&offering=community
 

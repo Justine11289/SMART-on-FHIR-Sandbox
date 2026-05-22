@@ -1,7 +1,7 @@
 {
     server: {
         type: 'R4',
-        url: 'http://$HOST:$R4_PORT/hapi-fhir-jpaserver/fhir',
+        url: 'https://$HOST/v/r4/fhir',
         tags: [
             {
                 key: 'synthea-5-2019',

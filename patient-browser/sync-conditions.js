@@ -11,9 +11,9 @@ const JSON5   = require("json5");
 const CFG  = {};
 const HOST = process.env.HOST || "localhost";
 
-[2, 3, 4].forEach(v => {
+[4].forEach(v => {
     CFG[`r${v}`] = {
-        server: `http://${HOST}:${process.env[`R${v}_PORT`]}/hapi-fhir-jpaserver/fhir`,
+        server: `https://smartonfhir.sandbox.local/v/r4/fhir`,
         pickerConfigFile: [`./r${v}.tpl`]
     };
 });

@@ -33,10 +33,10 @@ services:
       db:
         condition: service_started
     environment:
-      - KEYCLOAK_ADMIN=admin
-      - KEYCLOAK_ADMIN_PASSWORD=admin
-      - KC_BOOTSTRAP_ADMIN_USERNAME=fhir-admin
-      - KC_BOOTSTRAP_ADMIN_PASSWORD=pa55word
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      - KC_BOOTSTRAP_ADMIN_USERNAME=${KC_BOOTSTRAP_ADMIN_USERNAME:-fhir-admin}
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KC_BOOTSTRAP_ADMIN_PASSWORD:-pa55word}
       - KC_HOSTNAME=${PUBLIC_HOST}
       - KC_HOSTNAME_PORT=443
       - KC_HOSTNAME_STRICT=false
@@ -71,6 +71,9 @@ services:
       - FHIR_SERVER_R4_INTERNAL=http://r4:8080/hapi-fhir-jpaserver/fhir
       - PICKER_CONFIG_R4=r4-local
       - CONNECT_SRC=" 'self' https://${PUBLIC_HOST} https://cdn.jsdelivr.net "
+      - USE_KEYCLOAK=true
+      - KEYCLOAK_ISSUER=https://${PUBLIC_HOST}/realms/fhir
+      - KEYCLOAK_INTERNAL_ISSUER=http://keycloak:8180/realms/fhir
     networks:
       - fhir-network
 
