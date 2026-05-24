@@ -1,245 +1,344 @@
-# SMART Dev Sandbox
-The SMART Dev Sandbox is an open source, Docker based version of the SMART Sandbox
-that can be installed locally on your machine to facilitate offline development and
-the use of custom data sets.
-**Please note that it is not designed for clinical use and should not be used to store or access patient medical data.**
+# SMART on FHIR Sandbox
 
-This tool supplements the free online sandbox at https://launch.smarthealthit.org
-and packages together the SMART launcher front end, DSTU2, STU3, R4 and R5 FHIR
-servers based on the excellent http://hapifhir.io project, sample patient data,
-an integrated web based interface to browse these sample patients, and a web based
-FHIR data explorer. Additionally, these components can be set up individually from
-the SMART docker images repository at https://hub.docker.com/u/smartonfhir/ (for
-example, to run a local FHIR server you can type `docker run -it -p 8080:8080 smartonfhir/hapi-5:r3-full`).
 
-Check it out and please open issues on Github if you have suggestions or run into any problems!
 
-<img width="100%" alt="SMART Dev-Sandbox" src="screenshot.png"/>
+This repository packages together:
 
-## System requirements
-The hardware requirements are mostly depending on the number and kind of HAPI servers that you want to run.
-We support 3 different servers for each FHIR version, each of which may require gigabytes of memory and
-multiple CPU cores. These are configurable in the `.env` file. You should disable servers that you don't
-need and give as much resources as you can to the remaining server(s).
+- a SMART launcher frontend and backend
+- a Keycloak realm for authentication and OAuth2/OIDC flows
+- an R4 HAPI FHIR server
+- a patient browser for sample data
+- an Nginx reverse proxy that serves the sandbox over HTTP or HTTPS
+
+This sandbox is for development and testing only. It is not intended for clinical use and should not be used to store or access real patient data.
+
+## What this project is for
+
+Use this sandbox when you want to:
+
+- test a SMART on FHIR app locally
+- validate a launch flow against Keycloak
+- register a fresh client id for each test run with `verify.py`
+- test an external app hosted on GitHub Pages or another HTTPS origin
+- confirm an app can pass the sandbox CSP and redirect restrictions
+
+## Repository layout
+
+- `docker-compose.yml` - main sandbox stack definition
+- `nginx.conf` - reverse proxy and Content Security Policy configuration
+- `verify.py` - helper script that registers a client in Keycloak and generates a SMART launcher URL
+- `smart-launcher-v2/` - SMART launcher application and backend
+- `patient-browser/` - sample patient browser configuration
+- `keycloak-data/` - imported realm configuration
+- `certs/` - local TLS certificate files used in HTTPS mode
+- `start_sandbox.bat` - Windows helper script for HTTPS startup
+- `start_fixed_host.bat` - helper script for fixed host deployment
+- `www/` - static landing pages and templates
+
+## Services
+
+The default stack includes these services:
+
+- `nginx` - public entry point and TLS termination
+- `keycloak` - authentication server and realm import
+- `smart-launcher` - SMART launch orchestration and OAuth flow handling
+- `r4` - HAPI FHIR R4 server
+- `patient-browser` - sample data browser UI
+- `db` - PostgreSQL database for Keycloak
+
+## Requirements
+
+You need:
+
+- Docker Desktop or another Docker Engine compatible runtime
+- Docker Compose v2
+- Git
+- A modern browser
+- Node.js if you want to update patient-browser autocomplete data
+
+Recommended system memory:
+
+- at least 4 GB if you run the full sandbox stack
+- more if you enable multiple services or larger FHIR datasets
+
+## Quick start
+
+### 1. Clone the repository
+
+```sh
+git clone https://github.com/smart-on-fhir/smart-dev-sandbox.git
+cd smart-dev-sandbox
+```
+
+### 2. Start the sandbox
+
+```sh
+docker compose up -d
+```
+
+### 3. Open the sandbox
+
+- HTTP mode: `http://localhost`
+- HTTPS mode: `https://smartonfhir.sandbox.local` or the host configured in `.env`
+
+If you are using the HTTPS startup script on Windows, open the generated public host instead of `localhost`.
 
 ## Configuration
-The sandbox behavior is determined on startup using environment variables. These variables are defined in the
-configuration file called `.env`. Once you make changes, you will need to restart the sandbox using 
-`docker compose down` and `docker compose up -d`. If you change the used databases (by selecting different HAPI images)
-you may also have to delete previous containers and volumes as described below.
 
-The sandbox also uses these Keycloak admin variables from `.env` when bootstrapping the realm:
-- `KEYCLOAK_ADMIN`
-- `KEYCLOAK_ADMIN_PASSWORD`
-- `KC_BOOTSTRAP_ADMIN_USERNAME`
-- `KC_BOOTSTRAP_ADMIN_PASSWORD`
+The sandbox reads its configuration from `.env` and from environment variables passed through `docker compose`.
 
-## Start the Dev Sandbox
-1. If you don't already have Docker on your system, download and install it from https://store.docker.com/search?type=edition&offering=community
+Important settings include:
 
-   *Note:* The default Docker runtime memory limit of 2 GB will not be sufficient for running all 3 HAPI servers
-   bundled with this distribution at the same time. We recommend that you set the memory limit of Docker to 4GB
-   or higher if you would like to run the servers in parallel (the default configuration of this dustribution).
-   
-2. If you don't already have Git on your system, download and install it from https://git-scm.com/downloads
-3. Clone this project 
-	```sh
-	git clone https://github.com/smart-on-fhir/smart-dev-sandbox.git
-	```
-4. Change to the new directory
-	```sh
-	cd smart-dev-sandbox
-	``` 
-5. Start the Docker containers
-	```sh
-	docker compose up -d
-	```
-4. It might take some time to download all the images on the first run.
-   After that, it probably takes a minute to start all the services. 
-5. Open http://localhost:4000 in your browser to access the sandbox.
+- `PUBLIC_HOST` - public host name used by launcher, Keycloak, and generated URLs
+- `HOST` - local host binding for non-HTTPS workflows
+- `LAUNCHER_SECRET` - signing secret used by the SMART launcher
+- `KEYCLOAK_ADMIN` - Keycloak admin user for bootstrap and admin API access
+- `KEYCLOAK_ADMIN_PASSWORD` - Keycloak admin password
+- `KC_BOOTSTRAP_ADMIN_USERNAME` - bootstrap admin username during first realm start
+- `KC_BOOTSTRAP_ADMIN_PASSWORD` - bootstrap admin password during first realm start
+- `CLIENT_ID` - FHIR client id used by the sandbox itself
+- `R4_IMAGE` - R4 HAPI image tag
+
+After changing `.env`, restart the stack:
+
+```sh
+docker compose down
+docker compose up -d
+```
 
 ## HTTPS mode for external SMART apps
 
-If you need to test apps hosted on HTTPS origins (for example GitHub Pages), use the included Windows startup script:
+If you want to test an app hosted on another HTTPS origin, use the HTTPS mode and the generated sandbox certificate.
 
-```sh
-start_sandbox.bat
-```
-
-What it does:
-
-- Detects your LAN IP and updates `.env`
-- Reuses existing certificate files in `./certs` when present, otherwise creates a local self-signed cert
-- Starts all services behind HTTPS on `https://<HOST_IP>`
-
-After startup, test launch URLs in this format:
-
-```text
-https://<HOST_IP>/launcher?launch_uri=<YOUR_APP_LAUNCH_URL>&fhir_ver=4
-```
-
-Note: Because the certificate is self-signed, your browser/OS must trust it for fetch/XHR calls to succeed from external HTTPS apps.
-
-### Sandbox-only mode for apps with fixed CSP
-
-If your app already has a fixed `connect-src` allowlist (for example it already allows `https://launcher.bdlfhir.net`) and you prefer not to edit app code:
-
-1. Map that hostname to your local sandbox IP in your hosts file.
-2. Start the sandbox with that hostname as the public host:
+On Windows, start the sandbox with:
 
 ```bat
-set SANDBOX_PUBLIC_HOST=launcher.bdlfhir.net
 start_sandbox.bat
 ```
 
-What this changes:
+What this does:
 
-- Sandbox URLs and issuer use `https://<SANDBOX_PUBLIC_HOST>`
-- Generated TLS certificate includes both host DNS and LAN IP SAN entries
-- No changes are needed in your app HTML/CSP as long as the host is already in its allowlist
+- detects your LAN IP
+- updates `.env`
+- reuses or creates TLS files in `./certs`
+- starts the stack behind HTTPS
 
-### Fixed-host deployment mode (recommended before public rollout)
+### Fixed host mode
 
-If you are moving the sandbox to a dedicated machine and want stable behavior:
-
-1. Set `.env`:
-	- `PUBLIC_HOST=launcher.bdlfhir.net`
-2. Put your TLS files at:
-	- `./certs/sandbox.crt`
-	- `./certs/sandbox.key`
-3. Start with existing cert mode:
-
-```bat
-set SANDBOX_PUBLIC_HOST=launcher.bdlfhir.net
-set SANDBOX_USE_EXISTING_CERT=1
-start_sandbox.bat
-```
-
-Or use the helper script:
+If you want a stable host name such as `smartonfhir.sandbox.local`, use the fixed host helper:
 
 ```bat
 start_fixed_host.bat
 ```
 
-Optional controls:
+This is useful when your test app has a fixed CSP or when you want a predictable redirect URI during repeated tests.
 
-- `SANDBOX_FORCE_CERT_REGEN=1` forces self-signed cert regeneration (useful only for local testing)
-- `SANDBOX_USE_EXISTING_CERT=1` prevents accidental overwrite of your real certificate files
+## How to test an external SMART app
 
-## Stop the Dev Sandbox
-To stop a running sandbox press <kbd>Ctrl+C</kbd>.  Eventually, you should see something like (depends on what services you have enabled):
+The app you are testing must match the sandbox launch expectations.
+
+### Required app format
+
+Your test app should:
+
+- be served from an HTTPS origin
+- expose a stable launch page or landing page URL
+- accept SMART launch query parameters or handle a redirect from the SMART launcher
+- use a redirect URI that is registered in Keycloak for that test client
+- keep the redirect URI exact, including scheme, host, path, and trailing slash rules
+- avoid relying on `localhost` when the sandbox is running on a public host name
+
+A typical test app flow is:
+
+1. Open `verify.py`
+2. Provide the app launch URL
+3. Provide the final redirect URI
+4. Use the generated SMART launcher URL
+5. Complete login and authorization in Keycloak
+6. Return to your app through the registered redirect URI
+
+### CSP requirements
+
+The sandbox sets a restrictive Content Security Policy in `nginx.conf` for the public sandbox origin.
+
+The important rule for test apps is the `connect-src` policy. The sandbox allows requests only to:
+
+- `'self'`
+- `https://<sandbox-host>`
+- `https://*.smarthealthit.org`
+- `https://cdn.jsdelivr.net`
+
+In practice this means your test app must either:
+
+- already allow `https://smartonfhir.sandbox.local` in its own CSP, or
+- be deployed on a host whose CSP is already compatible with the sandbox origin, or
+- be modified to include the sandbox origin in `connect-src`
+
+If your app performs fetch/XHR calls to the sandbox FHIR endpoint, those requests must be permitted by the app’s own CSP as well as the sandbox’s CSP.
+
+### Common CSP problems
+
+Typical failures include:
+
+- the app blocks fetch/XHR to `https://smartonfhir.sandbox.local`
+- the app hardcodes a different launch host in its CSP allowlist
+- the app uses HTTP while the sandbox is running over HTTPS
+- the app’s `redirect_uri` does not exactly match the Keycloak client configuration
+
+### Example app compatibility checklist
+
+Before testing an app, confirm:
+
+- the app page is available over HTTPS
+- the app’s CSP includes the sandbox host in `connect-src` if it makes calls to the sandbox
+- the launch URL is reachable from the browser
+- the final redirect URI is registered in Keycloak
+- the app can survive being launched with SMART query parameters such as `launch_url`, `launch`, `fhir_version`, and `state`
+- the app does not depend on a stale `client_secret` in local storage
+
+## Using `verify.py`
+
+`verify.py` is the easiest way to generate a fresh launch URL for testing.
+
+It will:
+
+- read the app launch URL from stdin
+- read the redirect URI from stdin
+- create a fresh client id in Keycloak
+- create and attach the SMART scopes needed for the launch
+- register both the app redirect URI and the launcher callback URI
+- print a SMART launcher URL you can open in the browser
+
+Example:
+
 ```sh
-Stopping launcher        ... done
-Stopping hapi-r4         ... done
-Stopping hapi-r3         ... done
-Stopping hapi-r2         ... done
-Stopping patient-browser ... done
-Stopping home-page       ... done
-Stopping fhir-viewer     ... done
+python verify.py
 ```
-If you don't see this output, then you will have to stop the services manually. To do so, run `docker compose down`.
 
-<!-- ======================================================================= -->
+You will be prompted for:
 
-## FHIR Data
+- App Launch URL
+- Redirect URI
 
-The HAPI FHIR servers are pre-populated with a set of sample patients and store data in Docker volumes.
-You can change the configuration to start the sandbox without any existing data.
+The script then prints a launcher URL similar to:
 
-### Choosing a dataset
-By default the servers will start with their "full database" that includes various generated datasets.
-To reduce the number of pre-inserted patients (or to start with an empty database) you need to change
-a configuration variable in the `.env` file. The name of that variable is:
-- For DSTU2 - `R2_IMAGE`
-- For STU3 - `R3_IMAGE`
-- For r4 - `R4_IMAGE`
-
-Please read the comments above that variable declaration to find out more about its possible values.
-
-**WARNING**
-
-The databases are stored in Docker volumes. Once you start a server (as part of the sandbox), a volume
-will be created and persisted across further restarts. If you then decide to use a different database
-and change the `RX_IMAGE` (where `X` is the numeric FHIR version) variable the sandbox may continue to use the already existing database
-which leads to unpredictable behavior. To avoid that you need to remove the volume and the container
-that created it first. For example for STU3 run:
-```sh
-docker container rm hapi-r3
-docker volume rm smart-dev-sandbox_r3-database
+```text
+https://smartonfhir.sandbox.local/?fhir_version=r4&launch_url=...
 ```
-Then start the sandbox as usual using `docker compose up -d`. **Note** that the same can also be used to reset
-a server to its initial state and quickly discard any changes that you have made to the data.
 
+### Keycloak registration behavior
 
-## Configuring the Patient Browser
-The patient browser can filter the sample data in many ways, including by medical condition. To update
-the browser's autocomplete functionality after inserting or modifying patients, install NodeJS and run
-the following commands:
+Each run creates a fresh client id and registers:
+
+- the app redirect URI you entered
+- `https://<sandbox-host>/v/r4/auth/keycloak-callback`
+
+It also creates or reuses these SMART client scopes:
+
+- `launch`
+- `launch/patient`
+- `patient/*.read`
+- `openid`
+- `fhirUser`
+- `online_access`
+
+## Launch flow
+
+The general SMART on FHIR flow in this sandbox is:
+
+1. Open the launcher URL generated by `verify.py`
+2. The launcher redirects to Keycloak
+3. The user logs in with Keycloak credentials
+4. The launcher continues the SMART flow
+5. The app receives the final code-based redirect
+6. The app exchanges the code for a token through the sandbox token endpoint
+
+For the current sandbox configuration, practitioner login happens before patient selection.
+
+## Patient browser configuration
+
+If you add or update sample patient data, regenerate the patient browser condition data:
 
 ```sh
-cd ./patient-browser
-
-# run this the first time
+cd patient-browser
 npm i
-
-# then, while the sandbox is running, to update conditions run:
-
-# for STU2
-node sync-conditions -s 2
-
-# for STU3
-node sync-conditions -s 3
-
-# for R4
-node sync-conditions -s 4
-
-# When done restart the sandbox
+node sync-conditions.js -s 4
 cd ..
 docker compose down
 docker compose up -d
 ```
 
-## Hosting the Sandbox
-By default everything runs on `localhost` but you can change that by updating the `HOST` variable. There could
-be multiple reasons for wanting to do that. For example:
+Use `-s 2`, `-s 3`, or `-s 4` depending on the FHIR version you are updating.
 
-1. You want the sandbox to be available on specific domain, say `sandbox.dev`. In this case add an entry to
-   your hosts file to map `sandbox.dev` to `127.0.0.1` and set `HOST` in `.env` to `sandbox.dev`.
-2. You want the sandbox to be accessible from every machine in your local network. Fond your LAN IP, set it
-   as `HOST` in your `.env` file and restart the sandbox.
-3. You want to put everything behind a proxy (perhaps to also enable SSL connections):
-	1. Set up a proxy server (typically NginX or Apache) and configure it to pass requests up to localhost:port
-	   for each service that you enable.
-	2. Set `HOST` in your `.env` file to the domain that your proxy server is listening to.
-	3. (Re)start the sandbox.
+## FHIR data
 
+The HAPI FHIR R4 server is preloaded with sample data and persists in a Docker volume.
 
-## Using Standalone Docker Images
-This project composes multiple Docker images together. It is also possible to use a subset of the images
-by setting the `XX_ENABLED` variable to `0` where `XX` is the name of the service that you want to exclude.
+If you switch the database image or want to reset the data, remove the relevant container and volume first.
 
-Since the images are available on the Docker hub at https://hub.docker.com/u/smartonfhir/ you can also use them
-directly. For example, to start just a local STU3 HAPI FHIR server, simply run:
+Example:
+
 ```sh
-docker run -it -p 8080:8080 smartonfhir/hapi-5:r3-full
+docker container rm hapi-r4
+docker volume rm smart-dev-sandbox_r4-database
 ```
 
-### Running the Dev Sandbox with TLS
+Then restart the sandbox with `docker compose up -d`.
 
-In `docker-compose.yml`:
+## Running with a stable public host
 
-* Change the values for `LAUNCHER_BASE_URL` and `BASE_URL` to `https`
-* Add a line in the `smart-launcher` section below `STU4_ENABLED`:
+If you need a long-lived host name for integration tests, set the public host in `.env` and use the fixed host startup path.
 
-    `SSL_PORT : ${LAUNCHER_PORT}`
+This is useful when:
 
-* change the ports line below that to:
+- your external app CSP is host-specific
+- you want stable OAuth redirect URIs
+- you need predictable URLs for automated tests
 
-    `- $LAUNCHER_PORT:$LAUNCHER_PORT`
+## Troubleshooting
 
-In `www/template.html`:
+### `Invalid parameter: redirect_uri`
 
-* Search and replace `http://$HOST:$LAUNCHER_PORT` to `https://$HOST:$LAUNCHER_PORT`
+This usually means the redirect URI used by the app is not exactly registered in Keycloak.
 
-And then `docker compose up -d` normally. Your launcher and fhir proxy will now be running with a self-signed certificate (that you'll have to approve of course).
+Check that:
+
+- the URI matches character-for-character
+- the scheme is correct (`https` vs `http`)
+- the host is correct
+- the path matches exactly
+- trailing slashes are consistent
+
+### `invalid_grant: Code not valid`
+
+This usually means one of the following:
+
+- the code was already used once
+- the code expired
+- the code was issued for a different redirect URI
+- the browser session was stale and reused an old redirect
+
+### CSP or network errors in the browser
+
+If your app cannot fetch from the sandbox:
+
+- verify the app’s own CSP includes the sandbox origin
+- verify the sandbox is running on the expected host
+- verify the browser trusts the sandbox certificate when using HTTPS mode
+- make sure the app uses HTTPS everywhere
+
+### Keycloak login appears to work but redirect fails
+
+Check:
+
+- the Keycloak client has the correct redirect URIs
+- the launcher callback URI is present
+- the test app uses the same redirect URI that was registered by `verify.py`
+
+## Security notes
+
+- This sandbox uses self-signed certificates in local HTTPS mode unless you provide your own TLS files.
+- Do not use production credentials or production patient data here.
+- Keep admin credentials out of source control in real deployments.
+- If your test app stores OAuth tokens or client secrets in local storage, clear stale values before testing a new launch.
 
