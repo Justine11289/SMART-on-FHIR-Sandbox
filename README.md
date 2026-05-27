@@ -1,344 +1,135 @@
 # SMART on FHIR Sandbox
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Docker](https://img.shields.io/badge/Docker-Ready-brightgreen.svg)]()
+[![FHIR R4](https://img.shields.io/badge/FHIR-R4-orange.svg)](https://www.hl7.org/fhir/resourcelist.html)
+[![Keycloak](https://img.shields.io/badge/Keycloak-24.x-lightgrey.svg)](https://www.keycloak.org/)
 
+An enterprise-grade, containerized orchestration platform engineered to simulate a production-ready **SMART on FHIR (HL7 R4)** environment. This sandbox provides healthcare software engineers, hospital IT departments, and clinical researchers with a high-fidelity, localized ecosystem to validate and stress-test digital health applications under rigid HTTPS security topologies, OAuth 2.0 / OpenID Connect (OIDC) protocols, and stringent Content Security Policies (CSP).
 
-This repository packages together:
+> ### ⚠️ Regulatory & Safety Compliance Notice
+> This platform is designated strictly for pre-clinical software verification, integration testing, and academic validation. It does not possess medical device clearance (e.g., TFDA/FDA SaMD), lacks production-grade access controls, and **must never** be deployed to process, store, or transmit real Protected Health Information (PHI) or actual clinical datasets.
 
-- a SMART launcher frontend and backend
-- a Keycloak realm for authentication and OAuth2/OIDC flows
-- an R4 HAPI FHIR server
-- a patient browser for sample data
-- an Nginx reverse proxy that serves the sandbox over HTTP or HTTPS
+---
 
-This sandbox is for development and testing only. It is not intended for clinical use and should not be used to store or access real patient data.
-
-## What this project is for
-
-Use this sandbox when you want to:
-
-- test a SMART on FHIR app locally
-- validate a launch flow against Keycloak
-- register a fresh client id for each test run with `verify.py`
-- test an external app hosted on GitHub Pages or another HTTPS origin
-- confirm an app can pass the sandbox CSP and redirect restrictions
-
-## Repository layout
-
-- `docker-compose.yml` - main sandbox stack definition
-- `nginx.conf` - reverse proxy and Content Security Policy configuration
-- `verify.py` - helper script that registers a client in Keycloak and generates a SMART launcher URL
-- `smart-launcher-v2/` - SMART launcher application and backend
-- `patient-browser/` - sample patient browser configuration
-- `keycloak-data/` - imported realm configuration
-- `certs/` - local TLS certificate files used in HTTPS mode
-- `start_sandbox.bat` - Windows helper script for HTTPS startup
-- `start_fixed_host.bat` - helper script for fixed host deployment
-- `www/` - static landing pages and templates
-
-## Services
-
-The default stack includes these services:
-
-- `nginx` - public entry point and TLS termination
-- `keycloak` - authentication server and realm import
-- `smart-launcher` - SMART launch orchestration and OAuth flow handling
-- `r4` - HAPI FHIR R4 server
-- `patient-browser` - sample data browser UI
-- `db` - PostgreSQL database for Keycloak
-
-## Requirements
-
-You need:
-
-- Docker Desktop or another Docker Engine compatible runtime
-- Docker Compose v2
-- Git
-- A modern browser
-- Node.js if you want to update patient-browser autocomplete data
-
-Recommended system memory:
-
-- at least 4 GB if you run the full sandbox stack
-- more if you enable multiple services or larger FHIR datasets
-
-## Quick start
-
-### 1. Clone the repository
-
-```sh
-git clone https://github.com/smart-on-fhir/smart-dev-sandbox.git
-cd smart-dev-sandbox
-```
-
-### 2. Start the sandbox
-
-```sh
-docker compose up -d
-```
-
-### 3. Open the sandbox
-
-- HTTP mode: `http://localhost`
-- HTTPS mode: `https://smartonfhir.sandbox.local` or the host configured in `.env`
-
-If you are using the HTTPS startup script on Windows, open the generated public host instead of `localhost`.
-
-## Configuration
-
-The sandbox reads its configuration from `.env` and from environment variables passed through `docker compose`.
-
-Important settings include:
-
-- `PUBLIC_HOST` - public host name used by launcher, Keycloak, and generated URLs
-- `HOST` - local host binding for non-HTTPS workflows
-- `LAUNCHER_SECRET` - signing secret used by the SMART launcher
-- `KEYCLOAK_ADMIN` - Keycloak admin user for bootstrap and admin API access
-- `KEYCLOAK_ADMIN_PASSWORD` - Keycloak admin password
-- `KC_BOOTSTRAP_ADMIN_USERNAME` - bootstrap admin username during first realm start
-- `KC_BOOTSTRAP_ADMIN_PASSWORD` - bootstrap admin password during first realm start
-- `CLIENT_ID` - FHIR client id used by the sandbox itself
-- `R4_IMAGE` - R4 HAPI image tag
-
-After changing `.env`, restart the stack:
-
-```sh
-docker compose down
-docker compose up -d
-```
-
-## HTTPS mode for external SMART apps
-
-If you want to test an app hosted on another HTTPS origin, use the HTTPS mode and the generated sandbox certificate.
-
-On Windows, start the sandbox with:
-
-```bat
-start_sandbox.bat
-```
-
-What this does:
-
-- detects your LAN IP
-- updates `.env`
-- reuses or creates TLS files in `./certs`
-- starts the stack behind HTTPS
-
-### Fixed host mode
-
-If you want a stable host name such as `smartonfhir.sandbox.local`, use the fixed host helper:
-
-```bat
-start_fixed_host.bat
-```
-
-This is useful when your test app has a fixed CSP or when you want a predictable redirect URI during repeated tests.
-
-## How to test an external SMART app
-
-The app you are testing must match the sandbox launch expectations.
-
-### Required app format
-
-Your test app should:
-
-- be served from an HTTPS origin
-- expose a stable launch page or landing page URL
-- accept SMART launch query parameters or handle a redirect from the SMART launcher
-- use a redirect URI that is registered in Keycloak for that test client
-- keep the redirect URI exact, including scheme, host, path, and trailing slash rules
-- avoid relying on `localhost` when the sandbox is running on a public host name
-
-A typical test app flow is:
-
-1. Open `verify.py`
-2. Provide the app launch URL
-3. Provide the final redirect URI
-4. Use the generated SMART launcher URL
-5. Complete login and authorization in Keycloak
-6. Return to your app through the registered redirect URI
-
-### CSP requirements
-
-The sandbox sets a restrictive Content Security Policy in `nginx.conf` for the public sandbox origin.
-
-The important rule for test apps is the `connect-src` policy. The sandbox allows requests only to:
-
-- `'self'`
-- `https://<sandbox-host>`
-- `https://*.smarthealthit.org`
-- `https://cdn.jsdelivr.net`
-
-In practice this means your test app must either:
-
-- already allow `https://smartonfhir.sandbox.local` in its own CSP, or
-- be deployed on a host whose CSP is already compatible with the sandbox origin, or
-- be modified to include the sandbox origin in `connect-src`
-
-If your app performs fetch/XHR calls to the sandbox FHIR endpoint, those requests must be permitted by the app’s own CSP as well as the sandbox’s CSP.
-
-### Common CSP problems
-
-Typical failures include:
-
-- the app blocks fetch/XHR to `https://smartonfhir.sandbox.local`
-- the app hardcodes a different launch host in its CSP allowlist
-- the app uses HTTP while the sandbox is running over HTTPS
-- the app’s `redirect_uri` does not exactly match the Keycloak client configuration
-
-### Example app compatibility checklist
-
-Before testing an app, confirm:
-
-- the app page is available over HTTPS
-- the app’s CSP includes the sandbox host in `connect-src` if it makes calls to the sandbox
-- the launch URL is reachable from the browser
-- the final redirect URI is registered in Keycloak
-- the app can survive being launched with SMART query parameters such as `launch_url`, `launch`, `fhir_version`, and `state`
-- the app does not depend on a stale `client_secret` in local storage
-
-## Using `verify.py`
-
-`verify.py` is the easiest way to generate a fresh launch URL for testing.
-
-It will:
-
-- read the app launch URL from stdin
-- read the redirect URI from stdin
-- create a fresh client id in Keycloak
-- create and attach the SMART scopes needed for the launch
-- register both the app redirect URI and the launcher callback URI
-- print a SMART launcher URL you can open in the browser
-
-Example:
-
-```sh
-python verify.py
-```
-
-You will be prompted for:
-
-- App Launch URL
-- Redirect URI
-
-The script then prints a launcher URL similar to:
+## Technical Architecture
+The platform does not merely run these microservices in parallel. Instead, it orchestrates a tightly coupled, federated security architecture governed by the **HL7 SMART App Launch Protocol** and **OAuth 2.0 / OIDC specifications**. 
+### System Architecture
+The system topology establishes a critical trust triangle between the Identity Provider (Keycloak), the Context Launcher, and the Protected Resource Server (HAPI FHIR R4). All intra-container token introspections and context bindings are executed within an isolated Docker virtual network, exposing only unified encrypted endpoints to the host system.
 
 ```text
-https://smartonfhir.sandbox.local/?fhir_version=r4&launch_url=...
+ ┌────────────────────────┐
+ │     smart-launcher     │ (1) Ingests Launch Request & Generates Context
+ └───────────┬────────────┘
+             │ 
+             │ (2) Redirects for Authentication via Nginx Proxy
+             ▼
+ ┌────────────────────────┐
+ │        keycloak        │ (3) Validates Practitioner Identity 
+ │   (Identity Provider)  │ (4) Mints Cryptographically Signed Access Tokens
+ └───────────┬────────────┘
+             │
+             │ (5) Presents Access Token with SMART Scopes (e.g., patient/*.read)
+             ▼
+ ┌────────────────────────┐
+ │     HAPI FHIR R4       │ (6) Introspects/Verifies Token Signature against Keycloak
+ │   (Resource Server)    │ (7) Releases Authorized Clinical Profiles (Demographics/Vitals)
+ └────────────────────────┘
+```
+### Service Architecture
+- Contextual Orchestration (smart-launcher): Rather than acting as a standalone web application, it simulates the Electronic Health Record (EHR) session state. It initializes the launch handshake by binding user sessions to specific clinical contexts (Patient ID / Practitioner ID) before federating the authorization request.
+- Identity Federation & Access Control (keycloak / db): Serving as the centralized Authorization Server backed by a dedicated PostgreSQL volume, it ingests requests from the launcher. It manages OAuth 2.0 client registries configured via verify.py and enforces role-based access control, translating clinician identities into cryptographically secure JSON Web Tokens (JWT).
+- Protected Resource Server (r4): The HAPI FHIR engine operates under explicit token-verification constraints. It does not expose clinical endpoints openly; instead, it intercepts all incoming RESTful HTTP requests, cross-references the embedded OAuth 2.0 bearer tokens against Keycloak's public keys, and enforces scope-level data filtering.
+- Edge Proxy Gatekeeper (nginx / certs): Wraps all interconnected components behind a unified TLS 1.3 reverse-proxy. This ensures that token exchanges, launch contexts, and FHIR resource queries are encrypted under a monolithic host interface to satisfy identical cross-origin policies and mitigate mixed-content vulnerabilities.
+#### Key Features
+- High-Fidelity HTTPS Simulation: Implements an automated local Certificate Authority (CA) pipeline. Generates dynamic TLS credentials to test external applications hosted on public secure origins under realistic browser runtime constraints.
+- Dynamic Client Provisioning Engine: A programmatic onboarding utility that communicates with Keycloak's Administration API to register fresh clients on-the-fly, automating the mapping of complex SMART OAuth scopes without manual dashboard configuration.
+- Rigid CSP Emulation: Pre-configured with restrictive HTTP header rules within Nginx to flag cross-origin errors, mixed-content blocks, and unauthorized socket connections prior to hospital-wide EHR deployment.
+### Directory Structure
+```
+├── docker-compose.yml       # Multi-container orchestration blueprint
+├── nginx.conf               # Enterprise reverse-proxy & rigid CSP layout
+├── verify.py                # Keycloak API client onboarding & launch URL generator
+├── smart-launcher-v2/       # Core SMART launch handler and backend services
+├── patient-browser/         # UI subsystem for cohort identification and lookup
+├── keycloak-data/           # Pre-configured medical realm configurations
+├── certs/                   # Automated storage for local TLS certificate chains
+├── start_sandbox.bat        # Automated initialization script for dynamic LAN environments
+└── start_fixed_host.bat     # Automated initialization script for static hostname mapping
 ```
 
-### Keycloak registration behavior
+## Deployment
+### Prerequisites
+- Docker Desktop v24.0+ / Docker Engine compatible runtime
+- Docker Compose v2.0+
+- Python 3.8+ (with `requests` library for client registration scripts)
+1. Protocol A: Stable Host Deployment (Recommended)
 
-Each run creates a fresh client id and registers:
+   For long-lived integration pipelines, deterministic OAuth redirect URIs, and rigid app-side CSP definitions, bind the platform to a fixed loopback domain (`https://smartonfhir.sandbox.local`):
+   ```bash
+   start_fixed_host.bat
+   ```
+3. Protocol B: Dynamic LAN Topology Deployment
+   To perform point-of-care verification using external devices within the same local network, utilize the dynamic IP auto-detection pipeline:
+   ```bash
+   start_sandbox.bat
+   ```
+ 
+ _This script automatically resolves your current active IPv4 interface, provisions matching TLS certificates, and updates the core ecosystem configuration dynamically._
 
-- the app redirect URI you entered
-- `https://<sandbox-host>/v/r4/auth/keycloak-callback`
+### Core Environment Schema (`.env`)
+The orchestration runtime depends on the following localized environmental parameters:
+- `PUBLIC_HOST`: The canonical secure FQDN or IP interface parsed by the authorization server.
+- `LAUNCHER_SECRET`: A high-entropy cryptographic seed used to sign state tokens during authorization handshakes.
 
-It also creates or reuses these SMART client scopes:
+### SMART App Integration Specification
+External digital health solutions attempting to interface with this sandbox must comply with the following technical interface specifications:
+1. OAuth 2.0 Client Registration via `verify.py`
 
-- `launch`
-- `launch/patient`
-- `patient/*.read`
-- `openid`
-- `fhirUser`
-- `online_access`
+   Invoke the automated registration script within your continuous integration console:
+   ```bash
+   python verify.py
+   ```
+   The script requires execution parameters passed through standard input:
+   - App Launch URL: The exact secure HTTPS route of your application's launch landing page.
+   - Redirect URI: The absolute, case-sensitive callback endpoint authorized to exchange authorization codes for access tokens.
 
-## Launch flow
+2. Authorization Scopes
 
-The general SMART on FHIR flow in this sandbox is:
+   The platform provisions access tokens embedded with standard HL7 SMART App Launch scopes, including but not limited to:
+   - `launch` & `launch/patient`: Contextual execution authorization within an active record.
+   - `patient/*.read`: Read-level granularity across all preloaded FHIR resources.
+   - `openid` & `fhirUser`: Cross-entity identity verification.
 
-1. Open the launcher URL generated by `verify.py`
-2. The launcher redirects to Keycloak
-3. The user logs in with Keycloak credentials
-4. The launcher continues the SMART flow
-5. The app receives the final code-based redirect
-6. The app exchanges the code for a token through the sandbox token endpoint
+3. Network Layer Security & CSP Whitelisting
 
-For the current sandbox configuration, practitioner login happens before patient selection.
-
-## Patient browser configuration
-
-If you add or update sample patient data, regenerate the patient browser condition data:
-
-```sh
-cd patient-browser
-npm i
-node sync-conditions.js -s 4
-cd ..
-docker compose down
-docker compose up -d
-```
-
-Use `-s 2`, `-s 3`, or `-s 4` depending on the FHIR version you are updating.
-
-## FHIR data
-
-The HAPI FHIR R4 server is preloaded with sample data and persists in a Docker volume.
-
-If you switch the database image or want to reset the data, remove the relevant container and volume first.
-
-Example:
-
-```sh
-docker container rm hapi-r4
-docker volume rm smart-dev-sandbox_r4-database
-```
-
-Then restart the sandbox with `docker compose up -d`.
-
-## Running with a stable public host
-
-If you need a long-lived host name for integration tests, set the public host in `.env` and use the fixed host startup path.
-
-This is useful when:
-
-- your external app CSP is host-specific
-- you want stable OAuth redirect URIs
-- you need predictable URLs for automated tests
+   To prevent browser-level network drops, client applications executing fetch/XHR calls to the FHIR repository must whitelist the sandbox edge domain inside their native Content Security Policy headers:
+   ```HTTP
+   Content-Security-Policy: connect-src 'self' [https://smartonfhir.sandbox.local](https://smartonfhir.sandbox.local);
+   ```
 
 ## Troubleshooting
+1. `Invalid parameter: redirect_uri`
+   - Root Cause: The authorization request issued by the client application does not match the character string registered inside Keycloak via `verify.py`.
+   - Resolution: Verify that protocol schemes (`https`), hostnames, port sub-strings, and trailing slashes (`/`) match identically across both configurations.
+2. `invalid_grant: Code not valid`
+   - Root Cause: Reutilization of an expired authorization code or mismatch in client credentials during the POST exchange.
+   - Resolution: Re-initiate the launch workflow sequence from the primary launcher URL to obtain an unspent authorization grant.
+5. TLS / Untrusted Authority Exceptions
+   - Root Cause: Modern web browsers block connection requests to self-signed TLS endpoints by default.
+   - Resolution: Manually import the root certificate generated in the `./certs` repository into your system's trust store, or explicitly bypass the security exception inside the local testing browser profile.
 
-### `Invalid parameter: redirect_uri`
+## Scalability Targets
+- Multi-Version Coexistence: Extending orchestration bindings to support concurrent FHIR R5 architectures alongside existing R4 profiles.
+- Regional Guide Profiles: Incorporating specific regional implementation guide validations, specifically targeting Taiwan Core Implementation Guide (TW Core IG) structural definitions.
+- Synthetic Generation Pipelines: Integrating automated synthesis tools to refresh clinical test data dynamically upon network initializations.
 
-This usually means the redirect URI used by the app is not exactly registered in Keycloak.
+## Credits, Governance & License
+- Platform & Security Engineering: Tzu-Ting Huang and Chang Gung Memorial Hospital (CGMH).
+- Upstream Blueprint Attribution: Portions of this platform's architecture, launch workflow orchestration, and core components are derived from the open-source [SMART Launcher v2](https://github.com/smart-on-fhir/smart-launcher-v2) (Copyright © Boston Children's Hospital)
+- Enforced Industry Standards: HL7 FHIR Standard (v4.0.1), SMART App Launch Framework (v2.0.0), OAuth 2.0 (RFC 6749), OpenID Connect Core 1.0.
+- License: Distributed under the terms of the MIT License.
 
-Check that:
-
-- the URI matches character-for-character
-- the scheme is correct (`https` vs `http`)
-- the host is correct
-- the path matches exactly
-- trailing slashes are consistent
-
-### `invalid_grant: Code not valid`
-
-This usually means one of the following:
-
-- the code was already used once
-- the code expired
-- the code was issued for a different redirect URI
-- the browser session was stale and reused an old redirect
-
-### CSP or network errors in the browser
-
-If your app cannot fetch from the sandbox:
-
-- verify the app’s own CSP includes the sandbox origin
-- verify the sandbox is running on the expected host
-- verify the browser trusts the sandbox certificate when using HTTPS mode
-- make sure the app uses HTTPS everywhere
-
-### Keycloak login appears to work but redirect fails
-
-Check:
-
-- the Keycloak client has the correct redirect URIs
-- the launcher callback URI is present
-- the test app uses the same redirect URI that was registered by `verify.py`
-
-## Security notes
-
-- This sandbox uses self-signed certificates in local HTTPS mode unless you provide your own TLS files.
-- Do not use production credentials or production patient data here.
-- Keep admin credentials out of source control in real deployments.
-- If your test app stores OAuth tokens or client secrets in local storage, clear stale values before testing a new launch.
+Copyright © 2026 Tzu-Ting Huang, CGMH. All rights reserved.
+   
 
