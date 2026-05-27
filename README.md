@@ -45,7 +45,7 @@ The system topology establishes a critical trust triangle between the Identity P
 - High-Fidelity HTTPS Simulation: Implements an automated local Certificate Authority (CA) pipeline. Generates dynamic TLS credentials to test external applications hosted on public secure origins under realistic browser runtime constraints.
 - Dynamic Client Provisioning Engine: A programmatic onboarding utility that communicates with Keycloak's Administration API to register fresh clients on-the-fly, automating the mapping of complex SMART OAuth scopes without manual dashboard configuration.
 - Rigid CSP Emulation: Pre-configured with restrictive HTTP header rules within Nginx to flag cross-origin errors, mixed-content blocks, and unauthorized socket connections prior to hospital-wide EHR deployment.
-### Directory Structure
+#### Directory Structure
 ```
 ├── docker-compose.yml       # Multi-container orchestration blueprint
 ├── nginx.conf               # Enterprise reverse-proxy & rigid CSP layout
@@ -63,18 +63,19 @@ The system topology establishes a critical trust triangle between the Identity P
 - Docker Desktop v24.0+ / Docker Engine compatible runtime
 - Docker Compose v2.0+
 - Python 3.8+ (with `requests` library for client registration scripts)
+
 1. Protocol A: Stable Host Deployment (Recommended)
 
    For long-lived integration pipelines, deterministic OAuth redirect URIs, and rigid app-side CSP definitions, bind the platform to a fixed loopback domain (`https://smartonfhir.sandbox.local`):
    ```bash
    start_fixed_host.bat
    ```
-3. Protocol B: Dynamic LAN Topology Deployment
+2. Protocol B: Dynamic LAN Topology Deployment
    To perform point-of-care verification using external devices within the same local network, utilize the dynamic IP auto-detection pipeline:
    ```bash
    start_sandbox.bat
    ```
- 
+
  _This script automatically resolves your current active IPv4 interface, provisions matching TLS certificates, and updates the core ecosystem configuration dynamically._
 
 ### Core Environment Schema (`.env`)
