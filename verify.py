@@ -186,7 +186,7 @@ def register_with_keycloak(*, client_id: str, redirect_uri: str) -> None:
         scope_uuid = find_client_scope_id(token, scope_name)
         attach_default_scope(token, client_uuid, scope_uuid, scope_name)
 
-    print(f"已在 Keycloak 註冊 client：{client_id}")
+    print(f"Already registered client with Keycloak：{client_id}")
 
 
 def encode_launch_params(*, client_id: str, redirect_uri: str) -> str:
@@ -234,24 +234,23 @@ def run_session():
     client_id = str(uuid.uuid4())
     
     if not app_url or not redirect_uri:
-        print("錯誤：網址不能為空！")
+        print("Error：URL can't be empty！")
         return
 
     try:
         register_with_keycloak(client_id=client_id, redirect_uri=redirect_uri)
     except Exception as exc:
-        print(f"Keycloak 註冊失敗：{exc}")
+        print(f"Keycloak registration failed：{exc}")
         sys.exit(1)
 
     launcher_url = build_launcher_url(app_url=app_url, redirect_uri=redirect_uri, client_id=client_id)
 
-    print(f"\n" + "="*80)
-    print("SMART Launcher 連結已產生：")
-    print(f"\n\033[92m{launcher_url}\033[0m")
+    print(f"="*80)
+    print("SMART Launcher URL：")
+    print(f"\033[92m{launcher_url}\033[0m")
     print(f"="*80)
     
-    input("\n如果要繼續測試，請先保持這個視窗開著；按下 [ENTER] 只會結束腳本。")
-    print(f"\n已完成。若要重新產生連結，重新執行 verify.py 即可。")
+    input("Press Enter to exit...")
 
 if __name__ == "__main__":
     run_session()
